@@ -1,0 +1,183 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: bash -n claude-switch.sh
+
+  test-macos:
+    needs: lint
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create temporary keychain
+        run: |
+          KEYCHAIN_PATH="${RUNNER_TEMP}/test.keychain-db"
+          KEYCHAIN_PASS="ci-test-password"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security set-keychain-settings -t 300 "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security list-keychains -s "$KEYCHAIN_PATH"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PASS=$KEYCHAIN_PASS" >> "$GITHUB_ENV"
+
+      - name: Install
+        run: |
+          bash claude-switch.sh --install --prefix "$RUNNER_TEMP/bin"
+          test -x "$RUNNER_TEMP/bin/claude-switch"
+
+      - name: Help
+        run: bash claude-switch.sh --help
+
+      - name: Uninstall
+        run: |
+          bash claude-switch.sh --uninstall --prefix "$RUNNER_TEMP/bin"
+          test ! -f "$RUNNER_TEMP/bin/claude-switch"
+
+      - name: Keychain round-trip
+        run: |
+          SERVICE="Claude Code-credentials"
+          ACCOUNT="ci-test"
+          SECRET='{"sessionKey":"sk-test-1234","email":"ci@test.com"}'
+
+          security add-generic-password \
+            -s "$SERVICE" -a "$ACCOUNT" -w "$SECRET" \
+            -A "$KEYCHAIN_PATH"
+
+          FOUND=$(security find-generic-password \
+            -s "$SERVICE" -a "$ACCOUNT" -w "$KEYCHAIN_PATH")
+
+          if [ "$FOUND" != "$SECRET" ]; then
+            echo "::error::Keychain round-trip failed"
+            echo "Expected: $SECRET"
+            echo "Got:      $FOUND"
+            exit 1
+          fi
+          echo "Keychain round-trip OK"
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+
+  test-linux:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecret-tools dbus-x11 gnome-keyring
+
+      - name: Unlock gnome-keyring
+        run: |
+          eval "$(dbus-launch --sh-syntax)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
+          echo "" | gnome-keyring-daemon --unlock
+          echo "gnome-keyring unlocked"
+
+      - name: Install
+        run: |
+          dbus-run-session -- bash claude-switch.sh --install --prefix "$RUNNER_TEMP/bin"
+          test -x "$RUNNER_TEMP/bin/claude-switch"
+
+      - name: Help
+        run: dbus-run-session -- bash claude-switch.sh --help
+
+      - name: Uninstall
+        run: |
+          dbus-run-session -- bash claude-switch.sh --uninstall --prefix "$RUNNER_TEMP/bin"
+          test ! -f "$RUNNER_TEMP/bin/claude-switch"
+
+      - name: libsecret round-trip
+        run: |
+          dbus-run-session -- bash -c '
+            echo "" | gnome-keyring-daemon --unlock
+
+            SECRET="sk-test-round-trip-1234"
+
+            echo -n "$SECRET" | secret-tool store --label "ci-test" \
+              service claude-code type active-credentials
+
+            FOUND=$(secret-tool lookup service claude-code type active-credentials)
+
+            if [ "$FOUND" != "$SECRET" ]; then
+              echo "::error::libsecret round-trip failed"
+              echo "Expected: $SECRET"
+              echo "Got:      $FOUND"
+              exit 1
+            fi
+            echo "libsecret round-trip OK"
+
+            secret-tool clear service claude-code type active-credentials
+          '
+
+  test-wsl:
+    needs: lint
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up WSL
+        uses: Vampire/setup-wsl@v6
+        with:
+          distribution: Ubuntu-24.04
+          additional-packages: jq
+
+      - name: Syntax check in WSL
+        shell: wsl-bash {0}
+        run: bash -n claude-switch.sh
+
+      - name: Install
+        shell: wsl-bash {0}
+        run: |
+          bash claude-switch.sh --install --prefix /tmp/ci-test
+          test -x /tmp/ci-test/claude-switch
+
+      - name: Help
+        shell: wsl-bash {0}
+        run: bash claude-switch.sh --help
+
+      - name: Uninstall
+        shell: wsl-bash {0}
+        run: |
+          bash claude-switch.sh --uninstall --prefix /tmp/ci-test
+          test ! -f /tmp/ci-test/claude-switch
+
+      - name: PowerShell interop
+        shell: wsl-bash {0}
+        run: |
+          RESULT=$(powershell.exe -NoProfile -Command "Write-Host 'ok'" | tr -d '\r')
+          if [ "$RESULT" != "ok" ]; then
+            echo "::error::PowerShell interop failed: got '$RESULT'"
+            exit 1
+          fi
+          echo "PowerShell interop OK"
+
+      - name: wslpath interop
+        shell: wsl-bash {0}
+        run: |
+          CONVERTED=$(wslpath -u 'C:\Windows')
+          if [ -z "$CONVERTED" ]; then
+            echo "::error::wslpath returned empty string"
+            exit 1
+          fi
+          echo "wslpath C:\\Windows -> $CONVERTED"
+          echo "wslpath interop OK"
+
+      # DPAPI tests are skipped: Windows GitHub Actions runners use a service
+      # account with no loaded user profile, so [System.Security.Cryptography.
+      # ProtectedData]::Protect() with CurrentUser scope fails. WSL jobs above
+      # still validate script logic, install/uninstall, and Windows interop.
