@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Configuration
-readonly VERSION="1.0.0" # x-release-please-version
+readonly VERSION="1.1.0" # x-release-please-version
 readonly BACKUP_DIR="$HOME/.claude-switch-backup"
 readonly SEQUENCE_FILE="$BACKUP_DIR/sequence.json"
 YES_FLAG=false
