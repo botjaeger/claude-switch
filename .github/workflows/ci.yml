@@ -11,8 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      - name: Validate release bundle
+        run: |
+          chmod +x scripts/build.sh
+          ./scripts/build.sh
+          git diff --exit-code -- claude-switch.sh
       - name: Syntax check
         run: bash -n claude-switch.sh
+      - name: Shellcheck
+        run: shellcheck claude-switch.sh
 
   test-macos:
     needs: lint
@@ -34,15 +45,15 @@ jobs:
 
       - name: Install
         run: |
-          bash claude-switch.sh --install --prefix "$RUNNER_TEMP/bin"
+          bash claude-switch.sh install --prefix "$RUNNER_TEMP/bin"
           test -x "$RUNNER_TEMP/bin/claude-switch"
 
       - name: Help
-        run: bash claude-switch.sh --help
+        run: bash claude-switch.sh help
 
       - name: Uninstall
         run: |
-          bash claude-switch.sh --uninstall --prefix "$RUNNER_TEMP/bin"
+          bash claude-switch.sh uninstall --prefix "$RUNNER_TEMP/bin"
           test ! -f "$RUNNER_TEMP/bin/claude-switch"
 
       - name: Keychain round-trip
@@ -90,15 +101,33 @@ jobs:
 
       - name: Install
         run: |
-          dbus-run-session -- bash claude-switch.sh --install --prefix "$RUNNER_TEMP/bin"
+          dbus-run-session -- bash claude-switch.sh install --prefix "$RUNNER_TEMP/bin"
           test -x "$RUNNER_TEMP/bin/claude-switch"
 
       - name: Help
-        run: dbus-run-session -- bash claude-switch.sh --help
+        run: dbus-run-session -- bash claude-switch.sh help
+
+      - name: Run isolated profile integration test
+        run: bash tests/test-run-command.sh ./claude-switch.sh
+
+      - name: Run add command integration test
+        run: bash tests/test-add-command.sh ./claude-switch.sh
+
+      - name: Run interactive launcher integration test
+        run: bash tests/test-interactive-shell.sh ./claude-switch.sh
+
+      - name: Run legacy import integration test
+        run: bash tests/test-import-legacy.sh ./claude-switch.sh
+
+      - name: Run alias lifecycle integration test
+        run: bash tests/test-alias-lifecycle.sh ./claude-switch.sh
+
+      - name: Run install/uninstall integration test
+        run: bash tests/test-install-uninstall.sh ./claude-switch.sh
 
       - name: Uninstall
         run: |
-          dbus-run-session -- bash claude-switch.sh --uninstall --prefix "$RUNNER_TEMP/bin"
+          dbus-run-session -- bash claude-switch.sh uninstall --prefix "$RUNNER_TEMP/bin"
           test ! -f "$RUNNER_TEMP/bin/claude-switch"
 
       - name: libsecret round-trip
@@ -143,17 +172,17 @@ jobs:
       - name: Install
         shell: wsl-bash {0}
         run: |
-          bash claude-switch.sh --install --prefix /tmp/ci-test
+          bash claude-switch.sh install --prefix /tmp/ci-test
           test -x /tmp/ci-test/claude-switch
 
       - name: Help
         shell: wsl-bash {0}
-        run: bash claude-switch.sh --help
+        run: bash claude-switch.sh help
 
       - name: Uninstall
         shell: wsl-bash {0}
         run: |
-          bash claude-switch.sh --uninstall --prefix /tmp/ci-test
+          bash claude-switch.sh uninstall --prefix /tmp/ci-test
           test ! -f /tmp/ci-test/claude-switch
 
       - name: PowerShell interop
