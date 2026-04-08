@@ -71,7 +71,12 @@ main() {
     done
     set -- "${args[@]+"${args[@]}"}"
 
-    check_bash_version || return 1
+    # Bootstrap commands must run on systems with stock Bash 3.2 (e.g. macOS),
+    # so the Bash 4.4+ gate only applies once we know the command needs it.
+    case "${1:-}" in
+        help|version|install|uninstall) ;;
+        *) check_bash_version || return 1 ;;
+    esac
 
     if [[ "${1:-}" == --* ]]; then
         legacy_hint=$(legacy_command_hint "$1")
