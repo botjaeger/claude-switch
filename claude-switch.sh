@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-readonly VERSION="2.0.0" # x-release-please-version
+readonly VERSION="2.1.0" # x-release-please-version
 readonly STATE_DIR="$HOME/.claude-switch"
 readonly MANIFEST_FILE="$STATE_DIR/manifest.json"
 readonly CONFIGS_DIR="$STATE_DIR/configs"
