@@ -278,7 +278,7 @@ generate_account_id() {
 pretty_path() {
     local path="$1"
     if [[ "$path" == "$HOME"* ]]; then
-        echo "~${path#$HOME}"
+        echo "~${path#"$HOME"}"
     else
         echo "$path"
     fi
@@ -800,6 +800,7 @@ state_add_account_record() {
     local now
     now=$(iso8601_now)
 
+    # shellcheck disable=SC2016  # jq filter references $id/$email/etc via --arg, not shell expansion
     state_write_manifest_jq \
         --arg id "$account_id" \
         --arg email "$email" \
@@ -832,6 +833,7 @@ state_set_alias() {
     local alias_name="$2"
     local now
     now=$(iso8601_now)
+    # shellcheck disable=SC2016  # jq filter references $id/$alias/$now via --arg, not shell expansion
     state_write_manifest_jq \
         --arg id "$account_id" \
         --arg alias "$alias_name" \
@@ -846,6 +848,7 @@ state_remove_alias() {
     local account_id="$1"
     local now
     now=$(iso8601_now)
+    # shellcheck disable=SC2016  # jq filter references $id/$now via --arg, not shell expansion
     state_write_manifest_jq \
         --arg id "$account_id" \
         --arg now "$now" '
@@ -859,6 +862,7 @@ state_set_active_account() {
     local account_id="$1"
     local now
     now=$(iso8601_now)
+    # shellcheck disable=SC2016  # jq filter references $id/$now via --arg, not shell expansion
     state_write_manifest_jq \
         --arg id "$account_id" \
         --arg now "$now" '
@@ -871,6 +875,7 @@ state_remove_account_record() {
     local account_id="$1"
     local now
     now=$(iso8601_now)
+    # shellcheck disable=SC2016  # jq filter references $id/$now via --arg, not shell expansion
     state_write_manifest_jq \
         --arg id "$account_id" \
         --arg now "$now" '
@@ -996,6 +1001,7 @@ command_import_legacy() {
     fi
 
     now=$(iso8601_now)
+    # shellcheck disable=SC2016  # jq filter references $now via --arg, not shell expansion
     state_write_manifest_jq --arg now "$now" '
         .importedLegacy = true |
         .lastUpdated = $now

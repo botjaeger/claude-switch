@@ -250,7 +250,7 @@ generate_account_id() {
 pretty_path() {
     local path="$1"
     if [[ "$path" == "$HOME"* ]]; then
-        echo "~${path#$HOME}"
+        echo "~${path#"$HOME"}"
     else
         echo "$path"
     fi
