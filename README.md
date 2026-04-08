@@ -1,6 +1,6 @@
 # claude-switch
 
-Multi-account switcher for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Manage and switch between multiple Claude Code accounts from the command line.
+Multi-account switcher for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Manage multiple Claude Code accounts from the command line, launch them in isolated profiles, and fall back to global switching when needed.
 
 ## Prerequisites
 
@@ -117,7 +117,21 @@ Usage:
 
 If no Claude Code session exists, prints `No active Claude account found.`
 
-### Switch accounts
+### Run an account in an isolated profile (recommended)
+
+```bash
+claude-switch --run work
+claude-switch --run bob@example.com -- --model sonnet
+claude-switch --run work --include-local-settings -- --resume
+```
+
+`--run` launches `claude` with a dedicated `CLAUDE_CONFIG_DIR` for the managed account you choose. The first time you run an account, Claude Code will prompt you to authenticate inside that isolated profile. Sign in as the managed account email shown by `claude-switch`.
+
+By default, `--run` starts Claude with `--setting-sources user,project` so accounts stay more isolated when you work in the same repository. If you want Claude's repo-local settings source too, add `--include-local-settings`.
+
+Additional Claude arguments must come after `--` and are passed through unchanged.
+
+### Switch accounts (legacy)
 
 ```bash
 claude-switch --switch bob@example.com
@@ -125,6 +139,8 @@ claude-switch --switch work
 ```
 
 Accepts an email address or alias. Resolution checks email first, then alias.
+
+`--switch` is the legacy mode. It rewrites the global Claude Code authentication/configuration state and still requires you to restart Claude Code after switching. Prefer `--run` for day-to-day use.
 
 ### Set an alias for an account
 
@@ -138,7 +154,8 @@ The first argument can be an email or an existing alias. Aliases must be alphanu
 Once set, aliases can be used anywhere an email is accepted:
 
 ```bash
-claude-switch --switch work
+claude-switch --run work
+claude-switch --switch work   # legacy
 claude-switch --remove-account personal
 ```
 
@@ -182,7 +199,7 @@ claude-switch --version
 Output:
 
 ```text
-claude-switch 1.0.0
+claude-switch 1.1.0
 ```
 
 ### Help
@@ -196,8 +213,9 @@ Running with no arguments also shows the help message.
 ## How It Works
 
 1. **Add** — Reads the active Claude Code session (config + credentials) and stores a backup in `~/.claude-switch-backup/`. The config is read from `~/.claude/.claude.json` (or `~/.claude.json` as a fallback).
-2. **Switch** — Saves the current session, then restores the target account's config and credentials into the locations Claude Code reads from.
-3. **Restart** — After switching, restart Claude Code to pick up the new authentication.
+2. **Run** — Launches Claude Code with `CLAUDE_CONFIG_DIR` pointed at a per-account profile directory under `~/.claude-switch-backup/profiles/`.
+3. **Switch (legacy)** — Saves the current session, then restores the target account's config and credentials into the locations Claude Code reads from.
+4. **Restart (legacy)** — After `--switch`, restart Claude Code to pick up the new authentication.
 
 ### Data stored
 
@@ -205,6 +223,7 @@ Running with no arguments also shows the help message.
 ~/.claude-switch-backup/
   sequence.json                            # account registry & active state
   configs/.claude-config-<N>-<email>.json  # hidden; use ls -a
+  profiles/account-<N>-<email-slug>/       # isolated Claude profile per account
   credentials/                             # macOS only
 ```
 
@@ -215,24 +234,29 @@ Credentials are stored securely per platform:
 
 All files are created with `600`/`700` permissions.
 
+Isolated profiles are managed by Claude Code itself. Depending on how you use Claude, a profile directory may contain `.claude.json`, backups, settings, session history, and plugins.
+
 ## Typical Workflow
 
 ```bash
-# 1. Log into your first Claude Code account, then register it
+# 1. Log into your first Claude Code account in your default Claude profile, then register it
 claude-switch --add-account
 
-# 2. Sign into your second account in Claude Code, then register it
+# 2. Sign into your second account in your default Claude profile, then register it
 claude-switch --add-account
 
 # 3. Give them aliases
 claude-switch --alias alice@example.com work
 claude-switch --alias bob@example.com personal
 
-# 4. Switch between them anytime
-claude-switch --switch work              # by alias
-claude-switch --switch bob@example.com  # by email
+# 4. Launch isolated Claude sessions anytime
+claude-switch --run work
+claude-switch --run personal -- --model sonnet
 
-# 5. Restart Claude Code after each switch
+# 5. On the first run for each account, authenticate in that isolated profile
+
+# 6. Use the legacy global switcher only when needed
+claude-switch --switch work
 ```
 
 ## Credits

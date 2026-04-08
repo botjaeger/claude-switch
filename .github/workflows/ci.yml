@@ -96,6 +96,9 @@ jobs:
       - name: Help
         run: dbus-run-session -- bash claude-switch.sh --help
 
+      - name: Run isolated profile integration test
+        run: bash tests/test-run-command.sh
+
       - name: Uninstall
         run: |
           dbus-run-session -- bash claude-switch.sh --uninstall --prefix "$RUNNER_TEMP/bin"

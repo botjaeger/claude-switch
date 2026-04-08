@@ -9,6 +9,7 @@ set -euo pipefail
 readonly VERSION="1.1.0" # x-release-please-version
 readonly BACKUP_DIR="$HOME/.claude-switch-backup"
 readonly SEQUENCE_FILE="$BACKUP_DIR/sequence.json"
+readonly PROFILES_DIR="$BACKUP_DIR/profiles"
 YES_FLAG=false
 
 # Container detection
@@ -118,6 +119,47 @@ resolve_account_identifier() {
     echo ""
 }
 
+# Sanitize a value for use in a profile directory name
+sanitize_path_component() {
+    local value="$1"
+    value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')
+    if [[ -z "$value" ]]; then
+        value="profile"
+    fi
+    echo "$value"
+}
+
+# Get isolated Claude profile directory for an account
+get_account_profile_dir() {
+    local account_num="$1"
+    local email="$2"
+    local email_slug
+    email_slug=$(sanitize_path_component "$email")
+    echo "$PROFILES_DIR/account-${account_num}-${email_slug}"
+}
+
+# Get Claude config path inside an isolated profile
+get_profile_config_path() {
+    local profile_dir="$1"
+    echo "$profile_dir/.claude.json"
+}
+
+# Read authenticated email from an isolated profile
+read_profile_email() {
+    local profile_dir="$1"
+    local config_file
+    config_file=$(get_profile_config_path "$profile_dir")
+    if [[ ! -f "$config_file" ]]; then
+        echo ""
+        return 0
+    fi
+    if ! jq . "$config_file" >/dev/null 2>&1; then
+        echo "Error: Invalid JSON in $config_file" >&2
+        return 1
+    fi
+    jq -r '.oauthAccount.emailAddress // empty' "$config_file" 2>/dev/null
+}
+
 # Safe JSON write with validation
 write_json() {
     local file="$1"
@@ -144,8 +186,9 @@ check_bash_version() {
     fi
 }
 
-# Check dependencies
+# Check dependencies needed for the requested command
 check_dependencies() {
+    local command_name="${1:-}"
     for cmd in jq; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo "Error: Required command '$cmd' not found"
@@ -153,6 +196,15 @@ check_dependencies() {
             exit 1
         fi
     done
+
+    case "$command_name" in
+        --add-account|--remove-account|--switch|--status|--whoami)
+            ;;
+        *)
+            return
+            ;;
+    esac
+
     local platform
     platform=$(detect_platform)
     case "$platform" in
@@ -194,9 +246,10 @@ run_cmd() {
 
 # Setup backup directories
 setup_directories() {
-    mkdir -p "$BACKUP_DIR"/configs
+    mkdir -p "$BACKUP_DIR"/configs "$PROFILES_DIR"
     chmod 700 "$BACKUP_DIR"
     chmod 700 "$BACKUP_DIR"/configs
+    chmod 700 "$PROFILES_DIR"
     local platform
     platform=$(detect_platform)
     if [[ "$platform" == "macos" ]]; then
@@ -757,6 +810,110 @@ cmd_switch() {
     perform_switch "$target_account"
 }
 
+# Run Claude Code with an isolated profile for a managed account
+cmd_run() {
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: $0 --run <email|alias> [--include-local-settings] [-- <claude args...>]"
+        exit 1
+    fi
+    if ! command -v claude >/dev/null 2>&1; then
+        echo "Error: 'claude' command not found on PATH"
+        exit 1
+    fi
+
+    local identifier="$1"
+    shift
+    local include_local_settings=false
+    local claude_args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --include-local-settings)
+                include_local_settings=true
+                shift
+                ;;
+            --)
+                shift
+                claude_args=("$@")
+                break
+                ;;
+            *)
+                echo "Error: Unknown option for --run: $1"
+                echo "Usage: $0 --run <email|alias> [--include-local-settings] [-- <claude args...>]"
+                exit 1
+                ;;
+        esac
+    done
+
+    if [[ ! -f "$SEQUENCE_FILE" ]]; then
+        echo "Error: No accounts are managed yet"
+        exit 1
+    fi
+
+    local account_num
+    account_num=$(resolve_account_identifier "$identifier")
+    if [[ -z "$account_num" ]]; then
+        echo "Error: No account found matching: $identifier"
+        exit 1
+    fi
+
+    local account_info
+    account_info=$(jq -r --arg num "$account_num" '.accounts[$num] // empty' "$SEQUENCE_FILE")
+    if [[ -z "$account_info" ]]; then
+        echo "Error: Account not found: $identifier"
+        exit 1
+    fi
+
+    setup_directories
+
+    local email
+    email=$(jq -r '.email' <<< "$account_info")
+    local profile_dir
+    profile_dir=$(get_account_profile_dir "$account_num" "$email")
+    mkdir -p "$profile_dir"
+    chmod 700 "$profile_dir"
+
+    local profile_email=""
+    if ! profile_email=$(read_profile_email "$profile_dir"); then
+        exit 1
+    fi
+    if [[ -n "$profile_email" && "$profile_email" != "$email" ]]; then
+        echo "Error: Profile at $profile_dir is authenticated as $profile_email, expected $email."
+        echo "Remediation: remove that profile directory or run:"
+        echo "  CLAUDE_CONFIG_DIR=\"$profile_dir\" claude auth logout"
+        exit 1
+    fi
+    if [[ -z "$profile_email" ]]; then
+        echo "First run for $email."
+        echo "Claude Code will use an isolated profile at $profile_dir."
+        echo "When prompted, sign in as $email."
+    fi
+
+    local setting_sources="user,project"
+    if [[ "$include_local_settings" == true ]]; then
+        setting_sources="user,project,local"
+    fi
+
+    local claude_exit=0
+    if CLAUDE_CONFIG_DIR="$profile_dir" command claude --setting-sources "$setting_sources" "${claude_args[@]}"; then
+        claude_exit=0
+    else
+        claude_exit=$?
+    fi
+
+    local profile_email_after=""
+    if ! profile_email_after=$(read_profile_email "$profile_dir"); then
+        exit 1
+    fi
+    if [[ -n "$profile_email_after" && "$profile_email_after" != "$email" ]]; then
+        echo "Warning: Profile at $profile_dir is now authenticated as $profile_email_after, expected $email." >&2
+        echo "Remediation: remove that profile directory or run:" >&2
+        echo "  CLAUDE_CONFIG_DIR=\"$profile_dir\" claude auth logout" >&2
+        exit 2
+    fi
+
+    return "$claude_exit"
+}
+
 # Perform the actual account switch
 perform_switch() {
     local target_account="$1"
@@ -817,9 +974,9 @@ perform_switch() {
     ' "$SEQUENCE_FILE")
     write_json "$SEQUENCE_FILE" "$updated_sequence"
     if [[ "$platform" == "macos" ]]; then
-        echo "Switched to $target_email (service: $target_service)"
+        echo "Legacy switch mode updated global Claude Code auth to $target_email (service: $target_service)"
     else
-        echo "Switched to $target_email"
+        echo "Legacy switch mode updated global Claude Code auth to $target_email"
     fi
     cmd_list
     echo ""
@@ -1142,7 +1299,8 @@ show_usage() {
     echo "  --add-account                    Add current account to managed accounts"
     echo "  --remove-account <email|alias>   Remove account by email or alias"
     echo "  --list                           List all managed accounts"
-    echo "  --switch <email|alias>           Switch to specific account"
+    echo "  --run <email|alias> [-- ...]     Launch Claude in an isolated profile for a managed account"
+    echo "  --switch <email|alias>           Legacy: rewrite global Claude auth/config for a specific account"
     echo "  --status, --whoami               Show current account info"
     echo "  --alias <email|alias> <name>     Set an alias for an account"
     echo "  --unalias <alias_name>           Remove an alias from an account"
@@ -1153,13 +1311,16 @@ show_usage() {
     echo ""
     echo "Options:"
     echo "  -y, --yes                        Skip confirmation prompts"
+    echo "  --include-local-settings         With --run, include Claude's local repo settings source"
     echo ""
     echo "Examples:"
     echo "  $0 --add-account"
     echo "  $0 --list"
-    echo "  $0 --switch user@example.com"
+    echo "  $0 --run work -- --model sonnet"
+    echo "  $0 --run work --include-local-settings -- --resume"
+    echo "  $0 --switch user@example.com     # legacy"
     echo "  $0 --alias user@example.com work"
-    echo "  $0 --switch work"
+    echo "  $0 --switch work                 # legacy"
     echo "  $0 --unalias work"
     echo "  $0 --remove-account work"
 }
@@ -1203,7 +1364,7 @@ main() {
         exit 1
     fi
     check_bash_version
-    check_dependencies
+    check_dependencies "${1:-}"
     case "${1:-}" in
         --add-account)
             cmd_add_account
@@ -1214,6 +1375,10 @@ main() {
             ;;
         --list)
             cmd_list
+            ;;
+        --run)
+            shift
+            cmd_run "$@"
             ;;
         --switch)
             shift
