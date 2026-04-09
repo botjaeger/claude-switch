@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-readonly VERSION="2.1.0" # x-release-please-version
+readonly VERSION="2.2.0" # x-release-please-version
 readonly UPDATE_REPO_OWNER="botjaeger"
 readonly UPDATE_REPO_NAME="claude-switch"
 readonly UPDATE_RELEASE_API_URL="https://api.github.com/repos/${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}/releases/latest"
