@@ -52,14 +52,23 @@ EOF
 PROFILE_ONE_PREEXISTING="$(expected_v2_profile_dir "$HOME_ONE")"
 mkdir -p "$PROFILE_ONE_PREEXISTING/agents"
 mkdir -p "$PROFILE_ONE_PREEXISTING/projects/$PROJECT_KEY/memory"
+cat > "$PROFILE_ONE_PREEXISTING/settings.json" <<'JSON'
+{"theme":"stale"}
+JSON
+cat > "$PROFILE_ONE_PREEXISTING/agents/reviewer.md" <<'EOF'
+# stale reviewer
+EOF
+cat > "$PROFILE_ONE_PREEXISTING/projects/$PROJECT_KEY/memory/MEMORY.md" <<'EOF'
+# stale project memory
+EOF
 HOME="$HOME_ONE" PATH="$BIN_DIR:$PATH" CLAUDE_STUB_LOG_DIR="$LOG_ONE" \
     bash "$SCRIPT_PATH" run work -- --model sonnet --effort high >"$OUT_ONE" 2>&1
 mapfile -t ARGS_ONE < "$LOG_ONE/args"
 PROFILE_ONE=$(cat "$LOG_ONE/config_dir")
 assert_eq "$(expected_v2_profile_dir "$HOME_ONE")" "$PROFILE_ONE" "run should set isolated profile dir"
-assert_eq "$HOME_ONE/.claude/settings.json" "$(readlink "$PROFILE_ONE/settings.json")" "run should link shared user settings into the isolated profile"
-assert_eq "$HOME_ONE/.claude/agents/reviewer.md" "$(readlink "$PROFILE_ONE/agents/reviewer.md")" "run should merge shared user agents into an existing isolated profile dir"
-assert_eq "$HOME_ONE/.claude/projects/$PROJECT_KEY/memory/MEMORY.md" "$(readlink "$PROFILE_ONE/projects/$PROJECT_KEY/memory/MEMORY.md")" "run should merge project memory into an existing isolated profile dir"
+assert_eq "$HOME_ONE/.claude/settings.json" "$(readlink "$PROFILE_ONE/settings.json")" "run should replace stale profile settings with shared user settings"
+assert_eq "$HOME_ONE/.claude/agents/reviewer.md" "$(readlink "$PROFILE_ONE/agents/reviewer.md")" "run should replace stale shared user agents in an existing isolated profile dir"
+assert_eq "$HOME_ONE/.claude/projects/$PROJECT_KEY/memory/MEMORY.md" "$(readlink "$PROFILE_ONE/projects/$PROJECT_KEY/memory/MEMORY.md")" "run should replace stale project memory in an existing isolated profile dir"
 assert_eq "--setting-sources" "${ARGS_ONE[0]}" "run should pass setting sources flag"
 assert_eq "user,project,local" "${ARGS_ONE[1]}" "run should default to user,project,local"
 assert_eq "--model" "${ARGS_ONE[2]}" "run should preserve passthrough arg order"

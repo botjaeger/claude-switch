@@ -127,6 +127,9 @@ jobs:
       - name: Run install/uninstall integration test
         run: bash tests/test-install-uninstall.sh ./claude-switch.sh
 
+      - name: Run self-update integration test
+        run: bash tests/test-update-command.sh ./claude-switch.sh
+
       - name: Uninstall
         run: |
           dbus-run-session -- bash claude-switch.sh uninstall --prefix "$RUNNER_TEMP/bin"

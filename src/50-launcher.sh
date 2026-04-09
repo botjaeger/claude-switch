@@ -318,6 +318,9 @@ Manage:
 Inspect:
   status, whoami                   Show current account info
   import-legacy                    Import legacy ~/.claude-switch-backup data
+  install [--prefix /path]         Install claude-switch
+  uninstall [--prefix /path]       Uninstall claude-switch
+  update [--prefix /path]          Update claude-switch to the latest release
   version                          Show the current version
 
 Launcher:
@@ -357,6 +360,7 @@ run_subcommand() {
         remove) command_remove_account "$@" ;;
         install) command_install "$@" ;;
         uninstall) command_uninstall "$@" ;;
+        update|upgrade) command_update "$@" ;;
         import-legacy) command_import_legacy "$@" ;;
         version)
             echo "claude-switch $VERSION"

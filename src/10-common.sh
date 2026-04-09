@@ -256,6 +256,18 @@ pretty_path() {
     fi
 }
 
+replace_with_symlink() {
+    local source="$1"
+    local target="$2"
+
+    if [[ -L "$target" ]] && [[ "$(readlink "$target")" == "$source" ]]; then
+        return 0
+    fi
+
+    rm -rf "$target"
+    ln -s "$source" "$target"
+}
+
 link_shared_user_scope_into_profile() {
     local profile_dir="$1"
     local source_root="$HOME/.claude"
@@ -274,11 +286,12 @@ link_shared_user_scope_into_profile() {
                 if [[ "$(readlink "$target")" == "$source" ]]; then
                     continue
                 fi
-                rm -f "$target"
+                rm -rf "$target"
             elif [[ ! -e "$target" ]]; then
                 ln -s "$source" "$target"
                 continue
             elif [[ ! -d "$target" ]]; then
+                replace_with_symlink "$source" "$target"
                 continue
             fi
 
@@ -286,29 +299,12 @@ link_shared_user_scope_into_profile() {
             for source_item in "$source"/* "$source"/.[!.]* "$source"/..?*; do
                 [[ -e "$source_item" ]] || continue
                 target_item="$target/$(basename "$source_item")"
-                if [[ -L "$target_item" ]]; then
-                    if [[ "$(readlink "$target_item")" == "$source_item" ]]; then
-                        continue
-                    fi
-                    rm -f "$target_item"
-                elif [[ -e "$target_item" ]]; then
-                    continue
-                fi
-                ln -s "$source_item" "$target_item"
+                replace_with_symlink "$source_item" "$target_item"
             done
             continue
         fi
 
-        if [[ -L "$target" ]]; then
-            if [[ "$(readlink "$target")" == "$source" ]]; then
-                continue
-            fi
-            rm -f "$target"
-        elif [[ -e "$target" ]]; then
-            continue
-        fi
-
-        ln -s "$source" "$target"
+        replace_with_symlink "$source" "$target"
     done
 }
 
@@ -336,11 +332,12 @@ link_current_project_memory_into_profile() {
         if [[ "$(readlink "$target_dir")" == "$source_dir" ]]; then
             return 0
         fi
-        rm -f "$target_dir"
+        rm -rf "$target_dir"
     elif [[ ! -e "$target_dir" ]]; then
         ln -s "$source_dir" "$target_dir"
         return 0
     elif [[ ! -d "$target_dir" ]]; then
+        replace_with_symlink "$source_dir" "$target_dir"
         return 0
     fi
 
@@ -348,15 +345,7 @@ link_current_project_memory_into_profile() {
     for source_item in "$source_dir"/* "$source_dir"/.[!.]* "$source_dir"/..?*; do
         [[ -e "$source_item" ]] || continue
         target_item="$target_dir/$(basename "$source_item")"
-        if [[ -L "$target_item" ]]; then
-            if [[ "$(readlink "$target_item")" == "$source_item" ]]; then
-                continue
-            fi
-            rm -f "$target_item"
-        elif [[ -e "$target_item" ]]; then
-            continue
-        fi
-        ln -s "$source_item" "$target_item"
+        replace_with_symlink "$source_item" "$target_item"
     done
 }
 

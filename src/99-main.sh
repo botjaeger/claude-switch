@@ -12,6 +12,7 @@ legacy_command_hint() {
         --unalias) echo "claude-switch unalias <alias>" ;;
         --install) echo "claude-switch install" ;;
         --uninstall) echo "claude-switch uninstall" ;;
+        --update|--upgrade) echo "claude-switch update" ;;
         --version) echo "claude-switch version" ;;
         --help) echo "claude-switch help" ;;
         *)
@@ -36,6 +37,7 @@ show_usage() {
     echo "  import-legacy                    Import legacy ~/.claude-switch-backup data"
     echo "  install [--prefix /path]         Install claude-switch"
     echo "  uninstall [--prefix /path]       Uninstall claude-switch"
+    echo "  update [--prefix /path]          Update claude-switch to the latest release"
     echo "  version                          Show the current version"
     echo "  help                             Show this help"
     echo ""
@@ -53,6 +55,7 @@ show_usage() {
     echo "  claude-switch import-legacy"
     echo "  claude-switch run work -- --model sonnet"
     echo "  claude-switch switch work"
+    echo "  claude-switch update"
 }
 
 main() {
@@ -74,7 +77,7 @@ main() {
     # Bootstrap commands must run on systems with stock Bash 3.2 (e.g. macOS),
     # so the Bash 4.4+ gate only applies once we know the command needs it.
     case "${1:-}" in
-        help|version|install|uninstall) ;;
+        help|version|install|uninstall|update|upgrade) ;;
         *) check_bash_version || return 1 ;;
     esac
 
@@ -102,7 +105,7 @@ main() {
 
     if [[ $EUID -eq 0 ]] && ! in_container; then
         case "$1" in
-            help|version|install|uninstall)
+            help|version|install|uninstall|update|upgrade)
                 ;;
             *)
                 error "Do not run this script as root (unless running in a container)"

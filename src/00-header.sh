@@ -3,6 +3,9 @@
 set -euo pipefail
 
 readonly VERSION="2.0.0" # x-release-please-version
+readonly UPDATE_REPO_OWNER="botjaeger"
+readonly UPDATE_REPO_NAME="claude-switch"
+readonly UPDATE_RELEASE_API_URL="https://api.github.com/repos/${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}/releases/latest"
 readonly STATE_DIR="$HOME/.claude-switch"
 readonly MANIFEST_FILE="$STATE_DIR/manifest.json"
 readonly CONFIGS_DIR="$STATE_DIR/configs"
