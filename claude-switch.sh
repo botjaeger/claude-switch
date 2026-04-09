@@ -6,6 +6,9 @@
 set -euo pipefail
 
 readonly VERSION="2.1.0" # x-release-please-version
+readonly UPDATE_REPO_OWNER="botjaeger"
+readonly UPDATE_REPO_NAME="claude-switch"
+readonly UPDATE_RELEASE_API_URL="https://api.github.com/repos/${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}/releases/latest"
 readonly STATE_DIR="$HOME/.claude-switch"
 readonly MANIFEST_FILE="$STATE_DIR/manifest.json"
 readonly CONFIGS_DIR="$STATE_DIR/configs"
@@ -284,6 +287,18 @@ pretty_path() {
     fi
 }
 
+replace_with_symlink() {
+    local source="$1"
+    local target="$2"
+
+    if [[ -L "$target" ]] && [[ "$(readlink "$target")" == "$source" ]]; then
+        return 0
+    fi
+
+    rm -rf "$target"
+    ln -s "$source" "$target"
+}
+
 link_shared_user_scope_into_profile() {
     local profile_dir="$1"
     local source_root="$HOME/.claude"
@@ -302,11 +317,12 @@ link_shared_user_scope_into_profile() {
                 if [[ "$(readlink "$target")" == "$source" ]]; then
                     continue
                 fi
-                rm -f "$target"
+                rm -rf "$target"
             elif [[ ! -e "$target" ]]; then
                 ln -s "$source" "$target"
                 continue
             elif [[ ! -d "$target" ]]; then
+                replace_with_symlink "$source" "$target"
                 continue
             fi
 
@@ -314,29 +330,12 @@ link_shared_user_scope_into_profile() {
             for source_item in "$source"/* "$source"/.[!.]* "$source"/..?*; do
                 [[ -e "$source_item" ]] || continue
                 target_item="$target/$(basename "$source_item")"
-                if [[ -L "$target_item" ]]; then
-                    if [[ "$(readlink "$target_item")" == "$source_item" ]]; then
-                        continue
-                    fi
-                    rm -f "$target_item"
-                elif [[ -e "$target_item" ]]; then
-                    continue
-                fi
-                ln -s "$source_item" "$target_item"
+                replace_with_symlink "$source_item" "$target_item"
             done
             continue
         fi
 
-        if [[ -L "$target" ]]; then
-            if [[ "$(readlink "$target")" == "$source" ]]; then
-                continue
-            fi
-            rm -f "$target"
-        elif [[ -e "$target" ]]; then
-            continue
-        fi
-
-        ln -s "$source" "$target"
+        replace_with_symlink "$source" "$target"
     done
 }
 
@@ -364,11 +363,12 @@ link_current_project_memory_into_profile() {
         if [[ "$(readlink "$target_dir")" == "$source_dir" ]]; then
             return 0
         fi
-        rm -f "$target_dir"
+        rm -rf "$target_dir"
     elif [[ ! -e "$target_dir" ]]; then
         ln -s "$source_dir" "$target_dir"
         return 0
     elif [[ ! -d "$target_dir" ]]; then
+        replace_with_symlink "$source_dir" "$target_dir"
         return 0
     fi
 
@@ -376,15 +376,7 @@ link_current_project_memory_into_profile() {
     for source_item in "$source_dir"/* "$source_dir"/.[!.]* "$source_dir"/..?*; do
         [[ -e "$source_item" ]] || continue
         target_item="$target_dir/$(basename "$source_item")"
-        if [[ -L "$target_item" ]]; then
-            if [[ "$(readlink "$target_item")" == "$source_item" ]]; then
-                continue
-            fi
-            rm -f "$target_item"
-        elif [[ -e "$target_item" ]]; then
-            continue
-        fi
-        ln -s "$source_item" "$target_item"
+        replace_with_symlink "$source_item" "$target_item"
     done
 }
 
@@ -1511,6 +1503,115 @@ command_status() {
     show_usage_metrics
 }
 
+script_version_from_file() {
+    local file="$1"
+    sed -n 's/^readonly VERSION="\([^"]*\)".*/\1/p' "$file" | head -n1
+}
+
+claude_switch_download_update() {
+    local dest="$1"
+    local update_url="${CLAUDE_SWITCH_UPDATE_URL:-}"
+    local release_ref api_response
+
+    require_command curl || return 1
+
+    if [[ -n "$update_url" ]]; then
+        curl -fsSL "$update_url" -o "$dest" || {
+            error "Failed to download update from $update_url"
+            return 1
+        }
+        return 0
+    fi
+
+    api_response=$(curl -fsSL "$UPDATE_RELEASE_API_URL") || {
+        error "Failed to query the latest claude-switch release"
+        return 1
+    }
+
+    release_ref=$(jq -r '.tag_name // empty' <<< "$api_response")
+    if [[ -z "$release_ref" ]]; then
+        error "Latest release metadata did not include a tag name"
+        return 1
+    fi
+
+    update_url="https://raw.githubusercontent.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}/${release_ref}/claude-switch.sh"
+    curl -fsSL "$update_url" -o "$dest" || {
+        error "Failed to download claude-switch release $release_ref"
+        return 1
+    }
+}
+
+command_update() {
+    local install_dir=""
+    local binary_name="claude-switch"
+    local source_file="${BASH_SOURCE[0]}"
+    local target_file target_dir downloaded_file downloaded_version current_version
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --prefix)
+                if [[ $# -lt 2 ]]; then
+                    error "--prefix requires a path argument"
+                    return 1
+                fi
+                install_dir="$2"
+                shift 2
+                ;;
+            *)
+                error "Unknown option '$1'"
+                return 1
+                ;;
+        esac
+    done
+
+    source_file="$(cd "$(dirname "$source_file")" && pwd)/$(basename "$source_file")"
+    if [[ -n "$install_dir" ]]; then
+        target_file="$install_dir/$binary_name"
+        if [[ ! -f "$target_file" ]]; then
+            error "$binary_name not found at $target_file"
+            return 1
+        fi
+    else
+        target_file="$source_file"
+    fi
+    target_dir="$(dirname "$target_file")"
+
+    downloaded_file=$(mktemp "${TMPDIR:-/tmp}/claude-switch-update.XXXXXX")
+    if ! claude_switch_download_update "$downloaded_file"; then
+        rm -f "$downloaded_file"
+        return 1
+    fi
+    if ! bash -n "$downloaded_file"; then
+        rm -f "$downloaded_file"
+        error "Downloaded update is not a valid Bash script"
+        return 1
+    fi
+
+    downloaded_version=$(script_version_from_file "$downloaded_file")
+    current_version=$(script_version_from_file "$target_file")
+    if [[ -z "$downloaded_version" ]]; then
+        rm -f "$downloaded_file"
+        error "Downloaded update did not contain a version header"
+        return 1
+    fi
+
+    if [[ -n "$current_version" && "$downloaded_version" == "$current_version" ]]; then
+        rm -f "$downloaded_file"
+        echo "claude-switch is already up to date ($current_version)"
+        return 0
+    fi
+
+    echo "Updating claude-switch at $target_file"
+    if [[ -n "$current_version" ]]; then
+        echo "Current version: $current_version"
+    fi
+    echo "New version:     $downloaded_version"
+    run_maybe_sudo "$target_dir" cp "$downloaded_file" "$target_file"
+    run_maybe_sudo "$target_dir" chmod +x "$target_file"
+    rm -f "$downloaded_file"
+    echo "Successfully updated claude-switch to $downloaded_version"
+}
+
 command_install() {
     local install_dir="/usr/local/bin"
     local binary_name="claude-switch"
@@ -1934,6 +2035,9 @@ Manage:
 Inspect:
   status, whoami                   Show current account info
   import-legacy                    Import legacy ~/.claude-switch-backup data
+  install [--prefix /path]         Install claude-switch
+  uninstall [--prefix /path]       Uninstall claude-switch
+  update [--prefix /path]          Update claude-switch to the latest release
   version                          Show the current version
 
 Launcher:
@@ -1973,6 +2077,7 @@ run_subcommand() {
         remove) command_remove_account "$@" ;;
         install) command_install "$@" ;;
         uninstall) command_uninstall "$@" ;;
+        update|upgrade) command_update "$@" ;;
         import-legacy) command_import_legacy "$@" ;;
         version)
             echo "claude-switch $VERSION"
@@ -2062,6 +2167,7 @@ legacy_command_hint() {
         --unalias) echo "claude-switch unalias <alias>" ;;
         --install) echo "claude-switch install" ;;
         --uninstall) echo "claude-switch uninstall" ;;
+        --update|--upgrade) echo "claude-switch update" ;;
         --version) echo "claude-switch version" ;;
         --help) echo "claude-switch help" ;;
         *)
@@ -2086,6 +2192,7 @@ show_usage() {
     echo "  import-legacy                    Import legacy ~/.claude-switch-backup data"
     echo "  install [--prefix /path]         Install claude-switch"
     echo "  uninstall [--prefix /path]       Uninstall claude-switch"
+    echo "  update [--prefix /path]          Update claude-switch to the latest release"
     echo "  version                          Show the current version"
     echo "  help                             Show this help"
     echo ""
@@ -2103,6 +2210,7 @@ show_usage() {
     echo "  claude-switch import-legacy"
     echo "  claude-switch run work -- --model sonnet"
     echo "  claude-switch switch work"
+    echo "  claude-switch update"
 }
 
 main() {
@@ -2124,7 +2232,7 @@ main() {
     # Bootstrap commands must run on systems with stock Bash 3.2 (e.g. macOS),
     # so the Bash 4.4+ gate only applies once we know the command needs it.
     case "${1:-}" in
-        help|version|install|uninstall) ;;
+        help|version|install|uninstall|update|upgrade) ;;
         *) check_bash_version || return 1 ;;
     esac
 
@@ -2152,7 +2260,7 @@ main() {
 
     if [[ $EUID -eq 0 ]] && ! in_container; then
         case "$1" in
-            help|version|install|uninstall)
+            help|version|install|uninstall|update|upgrade)
                 ;;
             *)
                 error "Do not run this script as root (unless running in a container)"

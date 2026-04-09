@@ -1,31 +1,45 @@
 # claude-switch
 
-`claude-switch` is a cross-platform multi-account switcher for Claude. It can:
+[![CI](https://github.com/botjaeger/claude-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/botjaeger/claude-switch/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/botjaeger/claude-switch)](https://github.com/botjaeger/claude-switch/releases/latest)
+[![License](https://img.shields.io/github/license/botjaeger/claude-switch)](LICENSE)
+
+> The multi-account switcher for Claude Code and Claude Desktop.
+
+Stop logging out. Stop guessing which account is active. Keep `work`, `personal`, and client accounts one command away.
+
+`claude-switch` is a cross-platform Bash CLI and Claude account switcher for developers who regularly move between Claude accounts. Launch isolated Claude Code CLI sessions per account or switch the global account used by Claude Desktop from one command-line tool.
+
+If you are looking for a Claude Code account switcher, a Claude Desktop account switcher, or a way to manage multiple Claude accounts on one machine, this is what the project is built for.
+
+It can:
 
 - launch isolated terminal `claude` sessions per account
 - switch the global Claude auth/config used by Claude Desktop and default-profile workflows
-- manage aliases, account snapshots, and account credentials from one CLI
+- manage aliases, account snapshots, and secure per-account credentials from one CLI
 
-Version 2 rewrites the project around a new v2 state store, a launcher-first terminal experience, and an explicit `import-legacy` path from the old `~/.claude-switch-backup` layout.
+Version 2 introduces a new v2 state store, a launcher-first terminal experience, modular source under `src/`, and an explicit `import-legacy` path from the old `~/.claude-switch-backup` layout.
 
-## Prerequisites
+## Why use it?
 
-- Bash 4.4+
-- `jq`
-- Linux: `libsecret-tools`
-- WSL: `powershell.exe` and `wslpath`
+If any of these are familiar, `claude-switch` is for you:
 
-Do not run `claude-switch` as root outside a container.
+- you use separate work and personal Claude accounts
+- you jump between multiple client or tenant accounts
+- you want Claude Desktop on one account and CLI sessions on another
+- you are tired of manual sign-out and sign-in loops just to change context
 
-## Platform Support
+## What you get
 
-| Platform | Global Credential Backend | Stored Account Backend |
-|----------|---------------------------|------------------------|
-| macOS    | Keychain                  | Keychain               |
-| Linux    | libsecret                 | libsecret              |
-| WSL      | Windows DPAPI             | Windows DPAPI          |
+| Need | `claude-switch` behavior |
+|------|---------------------------|
+| Keep multiple accounts ready | Stores managed accounts with aliases like `work` or `personal` |
+| Open a CLI session as a different account | `run <email-or-alias>` launches `claude` in an isolated per-account profile |
+| Change the global account for Claude Desktop | `switch <email-or-alias>` rewrites the active global Claude auth/config |
+| Keep your tooling | Shared user surfaces like settings, agents, hooks, plugins, and skills still load in `run` profiles |
+| Avoid plaintext credential sprawl | Uses Keychain on macOS, `libsecret` on Linux, and DPAPI on WSL |
 
-## Installation
+## Install
 
 ### One-liner
 
@@ -48,40 +62,83 @@ cd claude-switch
 ./claude-switch.sh install --prefix ~/.local/bin
 ```
 
-### Uninstall
+### Update or uninstall
 
 ```bash
+claude-switch update
+claude-switch update --prefix ~/.local/bin
+
 claude-switch uninstall
 claude-switch uninstall --prefix ~/.local/bin
 claude-switch uninstall -y
 ```
 
-## Quick Start
+## Quick start
 
 ```bash
-# 1. Add a managed account by email and set an alias
+# Add a managed account and give it a short alias
 claude-switch add alice@example.com work
 
-# 2. Add another account
+# Add another account
 claude-switch add bob@example.com personal
 
-# 3. Open the interactive launcher
-claude-switch
+# See what is managed
+claude-switch list
 
-# 4. Or use direct commands
+# Open an isolated Claude CLI session as "work"
 claude-switch run work
+
+# Or change the global account used by Claude Desktop
+claude-switch switch personal
+
+# Open the interactive launcher
+claude-switch
+```
+
+## The mental model
+
+### `run` for isolated CLI sessions
+
+Use `run` when you want the current terminal session to act as a different Claude account without changing the global account used by Claude Desktop.
+
+```bash
+claude-switch run work
+claude-switch run work -- --model sonnet
+claude-switch run work -- --resume
+claude-switch run work --exclude-local-settings -- --resume
+```
+
+What `run` does:
+
+- points `CLAUDE_CONFIG_DIR` at an isolated per-account profile under `~/.claude-switch/profiles/...`
+- keeps auth isolated per account
+- keeps your normal user tooling available by linking shared Claude surfaces into the profile
+- validates the profile email before launch and after exit
+- supports passthrough Claude args after `--`
+- uses `--setting-sources user,project,local` by default
+- supports `--exclude-local-settings` when you want `user,project` only
+- still accepts `--include-local-settings` for compatibility, even though local settings are already included by default
+
+### `switch` for global Desktop/default-profile changes
+
+Use `switch` when you want to change the global Claude auth/config used by Claude Desktop and other default-profile workflows.
+
+```bash
+claude-switch switch work
 claude-switch switch personal
 ```
 
-## Usage
+After switching, restart Claude Desktop or Claude Code.
 
-### Interactive launcher
+## Interactive launcher
+
+Run `claude-switch` with no arguments in a TTY to open the interactive launcher.
 
 ```bash
 claude-switch
 ```
 
-With no arguments in a TTY, `claude-switch` opens a switchboard-style launcher with a session summary, managed profiles, command hints, a muted status line, and a minimal `›` prompt. Type commands such as:
+The launcher presents a switchboard-style terminal UI with a session summary, managed accounts, command hints, and a minimal prompt. Example inputs:
 
 - `add alice@example.com work`
 - `run work`
@@ -92,15 +149,74 @@ With no arguments in a TTY, `claude-switch` opens a switchboard-style launcher w
 - `help`
 - `quit`
 
-Slash-prefixed variants like `/help` and `/run work` are also accepted in the launcher.
+Slash-prefixed variants such as `/help` and `/run work` are also accepted.
 
-### Commands
+## Command guide
+
+### `add`
+
+`add <email> [alias]` runs `claude auth login --claudeai`, lets Claude Code complete its own authentication flow, then captures the newly active global Claude account into `claude-switch`.
+
+```bash
+claude-switch add alice@example.com work
+claude-switch add bob@example.com personal
+```
+
+Important behavior:
+
+- the email is required
+- the optional second argument is an alias
+- the current managed global account is snapshotted before the new auth flow begins
+- Claude Code is logged out first so an existing browser session cannot silently skip reauthorization
+- if the browser shows an Authentication Code, copy it and paste it back into the waiting terminal
+- the authenticated email must match the email you requested
+- if Claude authenticates as a different account, `add` fails instead of guessing
+
+### `status` and `whoami`
+
+These commands show the current global account and alias when the active account is managed. Usage output is best-effort and silently skipped when no usable token is available.
+
+```bash
+claude-switch status
+claude-switch whoami
+```
+
+### `update`
+
+`update` downloads the latest published `claude-switch.sh` release bundle from GitHub and replaces the currently running installed script.
+
+```bash
+claude-switch update
+claude-switch update --prefix ~/.local/bin
+```
+
+### Aliases
+
+Aliases are designed for day-to-day switching:
+
+- must be alphanumeric, hyphens, or underscores
+- cannot be purely numeric
+- cannot look like an email address
+
+Email resolution always wins before alias resolution.
+
+```bash
+claude-switch alias alice@example.com work
+claude-switch unalias work
+claude-switch remove personal
+```
+
+Identifier usage:
+
+- `add` requires a real email, with an optional alias
+- `run`, `switch`, `remove`, and `alias` accept either an alias or an email
+
+### Full command list
 
 ```bash
 claude-switch add alice@example.com work
 claude-switch list
 claude-switch run work -- --model sonnet
-claude-switch run work -- --resume
 claude-switch run work --exclude-local-settings -- --resume
 claude-switch switch personal
 claude-switch status
@@ -109,40 +225,12 @@ claude-switch alias alice@example.com work
 claude-switch unalias work
 claude-switch remove personal
 claude-switch import-legacy
+claude-switch update
 claude-switch help
 claude-switch version
 ```
 
-### `add`
-
-`add <email> [alias]` runs `claude auth login --claudeai`, lets Claude Code complete its own authentication flow, then captures the newly active global Claude account into `claude-switch`.
-
-- The email is required, for example `claude-switch add alice@example.com work`.
-- The optional second argument is an alias.
-- It snapshots the current managed global account before starting the new auth flow.
-- It logs Claude Code out first so an already-authenticated web session cannot silently skip reauthorization.
-- If Claude opens a browser page that shows an Authentication Code, copy that code and paste it back into the waiting terminal.
-- After Claude Code finishes authentication, the authenticated email must match the email you requested.
-- If Claude authenticates as a different account, `add` fails instead of guessing what you meant.
-
-### `run`
-
-`run` launches the `claude` CLI with `CLAUDE_CONFIG_DIR` pointed at a per-account profile directory under the v2 state root.
-
-- It does not change the global Claude config used by Claude Desktop.
-- It keeps auth isolated, but links shared user-scoped Claude surfaces like `~/.claude/settings.json`, `~/.claude/agents`, and `~/.claude/plugins` into the isolated profile so your user tooling still loads.
-- It also links the current project's Claude memory store from `~/.claude/projects/<project>/memory` when that memory exists, so repo-specific memory still follows the isolated profile.
-- It supports passthrough Claude args after `--`.
-- It validates the profile email before launch and after exit.
-- By default it uses `--setting-sources user,project,local`.
-- Add `--exclude-local-settings` to use `user,project` when you want a cleaner isolated profile.
-- `--include-local-settings` is still accepted for compatibility, but it is now the default behavior.
-
-### `switch`
-
-`switch` updates the global Claude auth/config used by Claude Desktop and other default-profile workflows. After switching, restart Claude Desktop or Claude Code.
-
-## Shared vs Isolated
+## Shared vs isolated
 
 When you use `claude-switch run`, the isolated profile is not a full clean-room Claude home.
 
@@ -158,43 +246,39 @@ Isolated per account/profile:
 
 - Claude authentication
 - the profile's `.claude.json`
-- per-profile runtime/session state created under `~/.claude-switch/profiles/...`
-- project/session data outside the linked `memory/` folder
+- per-profile runtime and session state under `~/.claude-switch/profiles/...`
+- project and session data outside the linked `memory/` folder
 
 In practice, `run` isolates account identity while preserving your normal Claude developer environment.
 
-## Security
+## Security model
 
-`claude-switch run` is designed for multi-account convenience, not strict environment isolation.
+> `claude-switch run` is built for multi-account convenience, not hard isolation.
 
-- Account auth is isolated per profile.
-- Your shared user tooling is still shared: agents, hooks, plugins, skills, commands, and user memory can all affect every `run` profile.
-- Current-project Claude memory is also shared into the isolated profile for the repo you launch from.
-- If you need hard separation between accounts, do not rely on `claude-switch` alone. Use separate OS users, separate machines, or a fully separate Claude home.
-- `switch` changes the global Claude auth/config, so it has a larger blast radius than `run`.
+- account auth is isolated per profile
+- shared user tooling is still shared across profiles: agents, hooks, plugins, skills, commands, and user memory can all affect every `run` profile
+- current-project Claude memory is also shared into the isolated profile for the repo you launch from
+- `switch` has a larger blast radius than `run` because it changes the global Claude auth/config
+- if you need hard separation, use separate OS users, separate machines, or a fully separate Claude home
 
-### `status`
+## Platform support
 
-`status` and `whoami` show the current global account and alias when the active account is managed. Usage output is best-effort and silently skipped when no usable token is available.
+| Platform | Global credential backend | Stored account backend |
+|----------|----------------------------|------------------------|
+| macOS    | Keychain                   | Keychain               |
+| Linux    | `libsecret`                | `libsecret`            |
+| WSL      | Windows DPAPI              | Windows DPAPI          |
 
-### Aliases
+## Prerequisites
 
-Aliases:
+- Bash 4.4+
+- `jq`
+- Linux: `libsecret-tools`
+- WSL: `powershell.exe` and `wslpath`
 
-- must be alphanumeric, hyphens, or underscores
-- cannot be purely numeric
-- cannot look like an email address
+Do not run `claude-switch` as root outside a container.
 
-Email resolution always wins before alias resolution.
-
-Identifier usage:
-
-- `add` requires a real email, with an optional alias: `claude-switch add alice@example.com work`
-- `run`, `switch`, `remove`, and `alias` accept either an alias or an email
-- use aliases for day-to-day commands once an account has one
-- use the email when the account has no alias yet, or when assigning/changing the alias
-
-## Legacy Migration
+## Legacy migration
 
 Version 2 uses a new state directory:
 
@@ -222,7 +306,7 @@ then:
 
 After import, v2 reads and writes only the new layout.
 
-## Storage Layout
+## Storage layout
 
 ```text
 ~/.claude-switch/
@@ -244,15 +328,23 @@ Version 2 is developed from modular Bash source under `src/` and bundled into th
 bash -n claude-switch.sh
 ```
 
-The generated release artifact is still:
+Useful test commands:
+
+```bash
+bash tests/test-run-command.sh ./claude-switch.sh
+bash tests/test-add-command.sh ./claude-switch.sh
+bash tests/test-interactive-shell.sh ./claude-switch.sh
+bash tests/test-import-legacy.sh ./claude-switch.sh
+bash tests/test-alias-lifecycle.sh ./claude-switch.sh
+bash tests/test-install-uninstall.sh ./claude-switch.sh
+bash tests/test-update-command.sh ./claude-switch.sh
+```
+
+The generated release artifact remains:
 
 ```text
 claude-switch.sh
 ```
-
-## Credits
-
-Originally derived from [cc-account-switcher](https://github.com/ming86/cc-account-switcher) by [@ming86](https://github.com/ming86) (MIT licensed), which was itself based on your [original gist](https://gist.github.com/botjaeger/943a13c8eec1d41339fbfe167cdc93ea) as [@botjaeger](https://github.com/botjaeger). Also inspired by [this gist](https://gist.github.com/Madd0g/dfad71d623784d6c1ec13d061a7b1de8) by [@Madd0g](https://github.com/Madd0g).
 
 ## License
 

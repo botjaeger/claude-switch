@@ -10,7 +10,7 @@ Current v2 shape:
 
 - modular Bash source lives in `src/`
 - `scripts/build.sh` bundles the release artifact into `claude-switch.sh`
-- the CLI supports `add <email> [alias]`, `run <email|alias>`, `switch <email|alias>`, `list`, `status`, `whoami`, `alias`, `unalias`, `remove`, `import-legacy`, `install`, `uninstall`, `version`, and `help`
+- the CLI supports `add <email> [alias]`, `run <email|alias>`, `switch <email|alias>`, `list`, `status`, `whoami`, `alias`, `unalias`, `remove`, `import-legacy`, `install`, `uninstall`, `update`, `version`, and `help`
 - running `claude-switch` with no arguments in a TTY opens the interactive launcher
 
 Requirements:
@@ -35,6 +35,9 @@ bash -n claude-switch.sh
 # Install to a test prefix
 ./claude-switch.sh install --prefix /tmp/test-bin
 
+# Self-update an installed binary
+./claude-switch.sh update --prefix /tmp/test-bin
+
 # Core integration tests
 bash tests/test-run-command.sh ./claude-switch.sh
 bash tests/test-add-command.sh ./claude-switch.sh
@@ -42,6 +45,7 @@ bash tests/test-interactive-shell.sh ./claude-switch.sh
 bash tests/test-import-legacy.sh ./claude-switch.sh
 bash tests/test-alias-lifecycle.sh ./claude-switch.sh
 bash tests/test-install-uninstall.sh ./claude-switch.sh
+bash tests/test-update-command.sh ./claude-switch.sh
 ```
 
 CI in `.github/workflows/ci.yml` runs:

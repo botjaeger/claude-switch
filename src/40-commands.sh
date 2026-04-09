@@ -492,6 +492,115 @@ command_status() {
     show_usage_metrics
 }
 
+script_version_from_file() {
+    local file="$1"
+    sed -n 's/^readonly VERSION="\([^"]*\)".*/\1/p' "$file" | head -n1
+}
+
+claude_switch_download_update() {
+    local dest="$1"
+    local update_url="${CLAUDE_SWITCH_UPDATE_URL:-}"
+    local release_ref api_response
+
+    require_command curl || return 1
+
+    if [[ -n "$update_url" ]]; then
+        curl -fsSL "$update_url" -o "$dest" || {
+            error "Failed to download update from $update_url"
+            return 1
+        }
+        return 0
+    fi
+
+    api_response=$(curl -fsSL "$UPDATE_RELEASE_API_URL") || {
+        error "Failed to query the latest claude-switch release"
+        return 1
+    }
+
+    release_ref=$(jq -r '.tag_name // empty' <<< "$api_response")
+    if [[ -z "$release_ref" ]]; then
+        error "Latest release metadata did not include a tag name"
+        return 1
+    fi
+
+    update_url="https://raw.githubusercontent.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}/${release_ref}/claude-switch.sh"
+    curl -fsSL "$update_url" -o "$dest" || {
+        error "Failed to download claude-switch release $release_ref"
+        return 1
+    }
+}
+
+command_update() {
+    local install_dir=""
+    local binary_name="claude-switch"
+    local source_file="${BASH_SOURCE[0]}"
+    local target_file target_dir downloaded_file downloaded_version current_version
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --prefix)
+                if [[ $# -lt 2 ]]; then
+                    error "--prefix requires a path argument"
+                    return 1
+                fi
+                install_dir="$2"
+                shift 2
+                ;;
+            *)
+                error "Unknown option '$1'"
+                return 1
+                ;;
+        esac
+    done
+
+    source_file="$(cd "$(dirname "$source_file")" && pwd)/$(basename "$source_file")"
+    if [[ -n "$install_dir" ]]; then
+        target_file="$install_dir/$binary_name"
+        if [[ ! -f "$target_file" ]]; then
+            error "$binary_name not found at $target_file"
+            return 1
+        fi
+    else
+        target_file="$source_file"
+    fi
+    target_dir="$(dirname "$target_file")"
+
+    downloaded_file=$(mktemp "${TMPDIR:-/tmp}/claude-switch-update.XXXXXX")
+    if ! claude_switch_download_update "$downloaded_file"; then
+        rm -f "$downloaded_file"
+        return 1
+    fi
+    if ! bash -n "$downloaded_file"; then
+        rm -f "$downloaded_file"
+        error "Downloaded update is not a valid Bash script"
+        return 1
+    fi
+
+    downloaded_version=$(script_version_from_file "$downloaded_file")
+    current_version=$(script_version_from_file "$target_file")
+    if [[ -z "$downloaded_version" ]]; then
+        rm -f "$downloaded_file"
+        error "Downloaded update did not contain a version header"
+        return 1
+    fi
+
+    if [[ -n "$current_version" && "$downloaded_version" == "$current_version" ]]; then
+        rm -f "$downloaded_file"
+        echo "claude-switch is already up to date ($current_version)"
+        return 0
+    fi
+
+    echo "Updating claude-switch at $target_file"
+    if [[ -n "$current_version" ]]; then
+        echo "Current version: $current_version"
+    fi
+    echo "New version:     $downloaded_version"
+    run_maybe_sudo "$target_dir" cp "$downloaded_file" "$target_file"
+    run_maybe_sudo "$target_dir" chmod +x "$target_file"
+    rm -f "$downloaded_file"
+    echo "Successfully updated claude-switch to $downloaded_version"
+}
+
 command_install() {
     local install_dir="/usr/local/bin"
     local binary_name="claude-switch"

@@ -15,7 +15,7 @@ src/00-header.sh   # VERSION, constants, globals, EXIT trap
 src/10-common.sh   # platform detect, validators, write_json, shared-profile symlinking, spinner
 src/20-backends.sh # macOS/Linux/WSL credential read/write/delete + active-credential store
 src/30-store.sh    # manifest.json helpers, legacy import command
-src/40-commands.sh # add/list/run/switch/status/alias/remove/install/uninstall
+src/40-commands.sh # add/list/run/switch/status/alias/remove/install/uninstall/update
 src/50-launcher.sh # framed interactive TTY launcher
 src/99-main.sh     # show_usage, legacy-flag rejection, main() dispatcher
 ```
@@ -77,7 +77,7 @@ Three flavors, all behind the same `global_credentials_{read,write}` / `stored_a
 - **Linux**: `secret-tool` (libsecret). Active credentials use legacy service `claude-code` (unchanged for compatibility with Claude Code itself); managed account credentials use service `claude-switch-v2`.
 - **WSL**: `powershell.exe` + DPAPI. Encrypted blobs live under `%USERPROFILE%\.claude-switch-v2\`, with the legacy dir `.claude-switch` still read for import.
 
-`backend_requirements_for` gates commands that actually need a backend (`add`, `switch`, `status`, `whoami`, `import-legacy`) so that `help`, `version`, `install`, `uninstall`, and `list` still work on systems missing `secret-tool`/`powershell.exe`.
+`backend_requirements_for` gates commands that actually need a backend (`add`, `switch`, `status`, `whoami`, `import-legacy`) so that `help`, `version`, `install`, `uninstall`, `update`, and `list` still work on systems missing `secret-tool`/`powershell.exe`.
 
 ### `run` — isolated profiles with shared user scope
 
@@ -100,10 +100,14 @@ When editing `run`, remember: symlinks into `~/.claude` mean anything a global a
 
 `command_switch` writes the target account's credentials into the active global credential store and merges the target's `oauthAccount` block into the live `~/.claude/.claude.json` (or `~/.claude.json` fallback, resolved by `get_claude_config_path`). It preserves everything else in the live config. After switching, the user must restart Claude Desktop / Claude Code.
 
+### `update` — self-update
+
+`command_update` downloads the latest published release bundle from GitHub, validates it with `bash -n`, compares the embedded `VERSION`, and replaces the current script (or `--prefix` target) in place. It reuses `run_maybe_sudo` for protected install dirs, so keep update/install behavior aligned.
+
 ### Interactive launcher (`src/50-launcher.sh`)
 
 Running `claude-switch` with no args in a TTY triggers `command_launcher`, a framed switchboard UI. It accepts the same subcommands (plus slash-prefixed `/run`, `/help`, etc.) via `launcher_execute_line → run_subcommand`, which is the same dispatcher `main()` uses — so new subcommands wire through `src/50-launcher.sh:run_subcommand` and automatically become available in both modes. `CLAUDE_SWITCH_FORCE_INTERACTIVE=1` forces launcher mode from a non-TTY (used by `tests/test-interactive-shell.sh`).
 
 ### Entry point (`src/99-main.sh`)
 
-`main()` pre-scans for `-y`/`--yes`, enforces the "no root outside a container" rule (bypassed for `help`/`version`/`install`/`uninstall`), rejects legacy `--flag` syntax with a migration hint, then dispatches via `run_subcommand`. `check_command_backend_requirements` is the single gate for per-command dependency checks.
+`main()` pre-scans for `-y`/`--yes`, enforces the "no root outside a container" rule (bypassed for `help`/`version`/`install`/`uninstall`/`update`), rejects legacy `--flag` syntax with a migration hint, then dispatches via `run_subcommand`. `check_command_backend_requirements` is the single gate for per-command dependency checks.
