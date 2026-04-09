@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/botjaeger/claude-switch/compare/v2.1.0...v2.2.0) (2026-04-09)
+
+
+### Features
+
+* add self-update flow and polish v2 docs ([2816004](https://github.com/botjaeger/claude-switch/commit/28160045532a06b8093ac667d5b54f790c9c6f41))
+
 ## [2.1.0](https://github.com/botjaeger/claude-switch/compare/v2.0.0...v2.1.0) (2026-04-08)
 
 
